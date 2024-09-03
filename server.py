@@ -19,6 +19,7 @@ from connectai.lark.sdk import Bot, MarketBot
 from connectai.lark.webhook import LarkServer
 from connectai.storage import ExpiredDictStorage
 from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
 from langchain.schema import (
     get_buffer_string,
     HumanMessage,
@@ -306,129 +307,139 @@ def oauth_handler():
             bot.update_card(message_id, card_content)
             continue
 
-        # 总结方案1: 通过大模型总结
-        # summary = llm_model(file_obj)
-
-        # 总结方案2: 通过调用飞书会议总结api
-        try:
-            # file_obj = """
-            # 2024-08-24 15:19:33 CST|45分钟 6秒
-            #
-            # 关键词:
-            # 软件产品设计、用户界面、功能需求、用户体验、性能优化、竞争分析
-            #
-            # 讲话人1
-            # 大家好，今天我们主要讨论新软件产品的设计和功能需求。我先介绍一下我们的目标和方向。这款软件主要面向中小型企业，旨在提供高效的项目管理和团队协作工具。我们需要确保用户界面友好，功能强大且易于使用。
-            #
-            # 讲话人2
-            # 是的，用户界面（UI）和用户体验（UX）的设计非常重要。我建议我们采用现代简洁的设计风格，避免过多的复杂元素。按钮和操作区域需要明显且易于点击，同时确保在不同设备上的兼容性。
-            #
-            # 讲话人3
-            # 在功能方面，我们需要重点关注以下几个模块：项目管理、任务分配、团队沟通和文件共享。每个模块都需要有明确的操作流程，确保用户能够快速上手。此外，我们还需要考虑性能优化，确保在高负载情况下软件运行流畅。
-            #
-            # 讲话人4
-            # 我这里有一些竞争对手的分析数据。我们主要的竞争对手有Trelo、Asana和Monday.com。它们各有优势，但也存在一些不足。我们可以借鉴它们的优点，同时避免它们的缺点。例如，Trelo的界面简洁但功能较少，Asana功能全面但界面复杂。我们需要找到一个平衡点。
-            #
-            # 讲话人5
-            # 在测试方面，我们会分阶段进行功能测试和性能测试。首先是单元测试，确保每个功能模块都能正常运行；然后是集成测试，确保各个模块之间的交互没有问题；最后是性能测试，模拟高并发场景，确保系统的稳定性。
-            #
-            # 讲话人6
-            # 作为客户代表，我想强调用户反馈的重要性。在产品上线之前，我们可以邀请一部分目标用户进行试用，并收集他们的反馈意见。这些反馈可以帮助我们优化产品，提升用户满意度。
-            #
-            # 讲话人1
-            # 非常感谢大家的建议和意见。总结一下，我们需要在接下来的时间内完成以下任务：UI/UX设计师负责界面设计，开发团队负责功能开发和性能优化，测试团队制定测试计划，市场分析师继续进行竞争分析，客户代表准备用户试用计划。我们每周进行一次进度汇报，确保项目按计划推进。
-            #
-            # 讲话人2
-            # 没问题，我会在下周之前提交初步的界面设计稿，供大家评审。
-            #
-            # 讲话人3
-            # 我们会根据设计稿开始功能开发，并与UI/UX设计师保持密切沟通，确保设计与开发同步进行。
-            #
-            # 讲话人4
-            # 我会继续收集和分析竞争对手的动态，并定期汇报给大家。
-            #
-            # 讲话人5
-            # 我们会制定详细的测试计划，并在每个开发阶段进行相应的测试。
-            #
-            # 讲话人6
-            # 我会联系一些潜在用户，邀请他们参与我们的试用计划，并准备收集反馈。
-            #
-            # 讲话人1
-            # 好的，那今天的会议就到这里。谢谢大家的参与和贡献。我们下周同一时间再见。
-            # """
-            bbody = {
-                "transcripts": [
-                    {
-                        "paragraph_id": 123,
-                        "start_ms": 111,
-                        "end_ms": 222,
-                        "sentences": [
-                            {
-                                "sentence_id": 1234,
-                                "content": file_obj,
-                                "lang": "zh_cn",
-                                "start_ms": 111,
-                                "stop_ms": 222,
-                            }
-                        ]
-                    }
-                ],
-                "duration": record_detail["data"]["minute"]["duration"],
-                "topic": record_detail["data"]["minute"]["title"],
-                "operator_id": record_detail["data"]["minute"]["owner_id"],
-            }
-            summary_task_resp = client.submit_summary_task(bbody,
-                                    headers={"Authorization": "Bearer {}".format(
-                                        user_info['user_access_token']['access_token'])})
-            if summary_task_resp.status_code == 200:
-                summary_task = summary_task_resp.json()
-                task_id = summary_task["data"]["task_id"]
-            else:
-                raise Exception("submit summary task api failed")
-            logging.info(">>> task_id: {}".format(task_id))
-        except Exception:
-            logging.error(">>> ERROR: {}".format(str(e)))
-            card_content["elements"][2]["actions"][0]["text"]["content"] = "提交会议总结任务失败"
-            bot.update_card(message_id, card_content)
-            continue
-
-        try:
-            # 获取智能会议总结结果
-            count = 0
-            allCount = 20
-            summary = None
-            while count < allCount:
-                logging.info(">>> time {}".format(count + 1))
-                get_task_response = client.get_summary_task(task_id, headers={
-                    "Authorization": "Bearer {}".format(user_info['user_access_token']['access_token'])})
-                if get_task_response.status_code == 200:
-                    task_data = get_task_response.json()
-                    if "data" in task_data and task_data["code"] == 0:
-                        summary = task_data["data"]
-                        break
-                if count == allCount - 1:
-                    break
-                logging.info(">>> no summary, sleep {}".format(10 * (count + 1)))
-                time.sleep(10 * (count + 1))
-                count += 1
-
-            if not summary:
-                raise Exception("no summary")
-            logging.info(">>> summary: {}".format(summary))
-
-            if "paragraph" in summary and "data" in summary["paragraph"]:
-                summary_data = summary["paragraph"]["data"]
-            else:
-                summary_data = ""
-            if not summary_data:
-                card_content["elements"][2]["actions"][0]["text"]["content"] = "录制内容太短，未生成总结"
+        # file_obj = """
+        # 2024-08-24 15:19:33 CST|45分钟 6秒
+        #
+        # 关键词:
+        # 软件产品设计、用户界面、功能需求、用户体验、性能优化、竞争分析
+        #
+        # 讲话人1
+        # 大家好，今天我们主要讨论新软件产品的设计和功能需求。我先介绍一下我们的目标和方向。这款软件主要面向中小型企业，旨在提供高效的项目管理和团队协作工具。我们需要确保用户界面友好，功能强大且易于使用。
+        #
+        # 讲话人2
+        # 是的，用户界面（UI）和用户体验（UX）的设计非常重要。我建议我们采用现代简洁的设计风格，避免过多的复杂元素。按钮和操作区域需要明显且易于点击，同时确保在不同设备上的兼容性。
+        #
+        # 讲话人3
+        # 在功能方面，我们需要重点关注以下几个模块：项目管理、任务分配、团队沟通和文件共享。每个模块都需要有明确的操作流程，确保用户能够快速上手。此外，我们还需要考虑性能优化，确保在高负载情况下软件运行流畅。
+        #
+        # 讲话人4
+        # 我这里有一些竞争对手的分析数据。我们主要的竞争对手有Trelo、Asana和Monday.com。它们各有优势，但也存在一些不足。我们可以借鉴它们的优点，同时避免它们的缺点。例如，Trelo的界面简洁但功能较少，Asana功能全面但界面复杂。我们需要找到一个平衡点。
+        #
+        # 讲话人5
+        # 在测试方面，我们会分阶段进行功能测试和性能测试。首先是单元测试，确保每个功能模块都能正常运行；然后是集成测试，确保各个模块之间的交互没有问题；最后是性能测试，模拟高并发场景，确保系统的稳定性。
+        #
+        # 讲话人6
+        # 作为客户代表，我想强调用户反馈的重要性。在产品上线之前，我们可以邀请一部分目标用户进行试用，并收集他们的反馈意见。这些反馈可以帮助我们优化产品，提升用户满意度。
+        #
+        # 讲话人1
+        # 非常感谢大家的建议和意见。总结一下，我们需要在接下来的时间内完成以下任务：UI/UX设计师负责界面设计，开发团队负责功能开发和性能优化，测试团队制定测试计划，市场分析师继续进行竞争分析，客户代表准备用户试用计划。我们每周进行一次进度汇报，确保项目按计划推进。
+        #
+        # 讲话人2
+        # 没问题，我会在下周之前提交初步的界面设计稿，供大家评审。
+        #
+        # 讲话人3
+        # 我们会根据设计稿开始功能开发，并与UI/UX设计师保持密切沟通，确保设计与开发同步进行。
+        #
+        # 讲话人4
+        # 我会继续收集和分析竞争对手的动态，并定期汇报给大家。
+        #
+        # 讲话人5
+        # 我们会制定详细的测试计划，并在每个开发阶段进行相应的测试。
+        #
+        # 讲话人6
+        # 我会联系一些潜在用户，邀请他们参与我们的试用计划，并准备收集反馈。
+        #
+        # 讲话人1
+        # 好的，那今天的会议就到这里。谢谢大家的参与和贡献。我们下周同一时间再见。
+        # """
+        if False:
+            # 总结方案1: 通过大模型总结
+            try:
+                summary_data = llm_model(file_obj, model_name="gpt-4o-mini")
+                # summary_data = llm_model(file_obj, model_name="claude-3-sonnet-20240229")
+                # summary_data = llm_model(file_obj, model_name="claude-3-opus-20240229")
+                logging.info(">>> summary_data: %r", summary_data)
+            except Exception as e:
+                logging.error(">>> ERROR: {}".format(str(e)))
+                card_content["elements"][2]["actions"][0]["text"]["content"] = "调用LLM总结失败"
                 bot.update_card(message_id, card_content)
                 continue
-        except Exception as e:
-            logging.error(">>> ERROR: {}".format(str(e)))
-            card_content["elements"][2]["actions"][0]["text"]["content"] = "未查询到智能总结结果"
-            bot.update_card(message_id, card_content)
-            continue
+        else:
+            # 总结方案2: 通过调用飞书会议总结api
+            try:
+                bbody = {
+                    "transcripts": [
+                        {
+                            "paragraph_id": 123,
+                            "start_ms": 111,
+                            "end_ms": 222,
+                            "sentences": [
+                                {
+                                    "sentence_id": 1234,
+                                    "content": file_obj,
+                                    "lang": "zh_cn",
+                                    "start_ms": 111,
+                                    "stop_ms": 222,
+                                }
+                            ]
+                        }
+                    ],
+                    "duration": record_detail["data"]["minute"]["duration"],
+                    "topic": record_detail["data"]["minute"]["title"],
+                    "operator_id": record_detail["data"]["minute"]["owner_id"],
+                }
+                summary_task_resp = client.submit_summary_task(bbody,
+                                        headers={"Authorization": "Bearer {}".format(
+                                            user_info['user_access_token']['access_token'])})
+                if summary_task_resp.status_code == 200:
+                    summary_task = summary_task_resp.json()
+                    task_id = summary_task["data"]["task_id"]
+                else:
+                    raise Exception("submit summary task api failed")
+                logging.info(">>> task_id: {}".format(task_id))
+            except Exception:
+                logging.error(">>> ERROR: {}".format(str(e)))
+                card_content["elements"][2]["actions"][0]["text"]["content"] = "提交会议总结任务失败"
+                bot.update_card(message_id, card_content)
+                continue
+
+            try:
+                # 获取智能会议总结结果
+                count = 0
+                allCount = 20
+                summary = None
+                while count < allCount:
+                    logging.info(">>> time {}".format(count + 1))
+                    get_task_response = client.get_summary_task(task_id, headers={
+                        "Authorization": "Bearer {}".format(user_info['user_access_token']['access_token'])})
+                    if get_task_response.status_code == 200:
+                        task_data = get_task_response.json()
+                        if "data" in task_data and task_data["code"] == 0:
+                            summary = task_data["data"]
+                            break
+                    if count == allCount - 1:
+                        break
+                    logging.info(">>> no summary, sleep {}".format(10 * (count + 1)))
+                    time.sleep(10 * (count + 1))
+                    count += 1
+
+                if not summary:
+                    raise Exception("no summary")
+                logging.info(">>> summary: {}".format(summary))
+
+                if "paragraph" in summary and "data" in summary["paragraph"]:
+                    summary_data = summary["paragraph"]["data"]
+                else:
+                    summary_data = ""
+                if not summary_data:
+                    card_content["elements"][2]["actions"][0]["text"]["content"] = "录制内容太短，未生成总结"
+                    bot.update_card(message_id, card_content)
+                    continue
+            except Exception as e:
+                logging.error(">>> ERROR: {}".format(str(e)))
+                card_content["elements"][2]["actions"][0]["text"]["content"] = "未查询到智能总结结果"
+                bot.update_card(message_id, card_content)
+                continue
 
         try:
             # 创建云文档
@@ -907,6 +918,43 @@ def get_gmt_time(start_ts, end_ts):
     # 将datetime对象格式化为GMT字符串时间
     result_str = f"{start_time_str} - {end_time_str} GMT+08"
     return result_str
+
+
+def llm_model(input, model_name="gpt-4o-mini"):
+    if "claude-3" in model_name:
+        model_config = {
+            "temperature": 0.7,
+            "model_name": model_name,
+            "streaming": False,
+            "anthropic_api_key": ANTHROPIC_API_KEY,
+            # default="https://api.anthropic.com",
+            "anthropic_api_url": ANTHROPIC_API_BASE,
+            "max_retries": 3
+        }
+        chat = ChatAnthropic(**model_config)
+    else:
+        model_config = {
+            "temperature": 0.7,
+            "model_name": model_name,
+            "streaming": False,
+            "openai_api_key": OPENAI_API_KEY,
+            "openai_api_base": OPENAI_API_BASE,
+            "max_retries": 3
+        }
+        chat = ChatOpenAI(**model_config)
+    metting_prompt = """我们来玩游戏。 你将扮演 MeetingGPT，一个帮助人们整理会议纪要的中文人工智能。
+    该 AI 旨在将用户输入的录音文字稿整理成逻辑清晰、结构清楚的会议纪要，它知道如何将每条信息放入笔记中对应的位置，尽管同一主题的信息可能散落在文字稿中不同的位置。
+    最重要的游戏规则：
+    （1）永远不要解释你自己，只要给我所要求的输出即可。 如果我要求你在“xx”之间显示一些东西，你会完全按照我的要求显示它。
+    （2）输出格式：第一行为类似'会议讨论了xxx，主要内容包括：'格式的总结内容，后续每一行都是总结的要点，所有要点都以bulletpoint的形式输出，一个bulletpoint下不可以有sub bulletpoint。
+    （3）每一个bulletpoint句末不要有标点，每一个bulletpoint的格式类似为'- **title**：content'
+    （4）以中文输出
+    我将把会议的录音文字稿发给你，你会按照要求输出整理完成的中文会议纪要。"""
+    system_message = [SystemMessage(content=metting_prompt)]
+
+    # 不需要上下文
+    messages = system_message + [HumanMessage(content=input)]
+    return chat.invoke(messages).content
 
 
 app = oauth.get_app()
