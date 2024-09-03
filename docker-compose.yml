@@ -1,0 +1,12 @@
+version: '2'
+services:
+  server:
+    restart: always
+    image: d.nextchat.dev:5000/feishu-app-demo
+    ports:
+      - "28888:8888"
+    environment:
+      - VIRTUAL_HOST=api.nextchat.dev
+#    volumes:
+#      - ./server.py:/server/server_bak.py
+    command: python /server/server_bak.py
